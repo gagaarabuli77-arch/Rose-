@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="ka">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Letter for Dixie</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Georgian:wght@500&display=swap">
+<style>
+/* Layout: full-screen ASCII night sky, nothing else. A faint tap hint at the bottom before, a replay button after. Single dark look by choice. */
+:root {
+  --bg: #030208;
+  --dim: #6f6478;
+  --fg: #e9dfe6;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --geo: "Noto Sans Georgian", system-ui, sans-serif;
+  color-scheme: dark;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+html, body { height: 100%; margin: 0; background: var(--bg); overflow: hidden; }
+body { -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; }
+[hidden] { display: none !important; }
+canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: pointer; }
+canvas:focus { outline: none; }
+.bottom {
+  position: fixed; left: 0; right: 0;
+  bottom: calc(26px + env(safe-area-inset-bottom, 0px));
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; justify-items: center; pointer-events: none;
+}
+.title {
+  position: fixed; left: 0; right: 0; top: calc(18px + env(safe-area-inset-top, 0px)); text-align: center; pointer-events: none;
+  font: 12px/1 var(--mono); letter-spacing: .32em; text-transform: uppercase; color: #b9a6b8;
+}
+#hint { margin: 0; font: 500 14px/1.4 var(--geo); color: var(--dim); animation: breathe 2.4s ease-in-out infinite; }
+@keyframes breathe { 50% { opacity: .35; } }
+#again {
+  pointer-events: auto; font: 500 13px/1 var(--geo); color: var(--fg);
+  background: rgba(14,10,22,.85); border: 1px solid #2d2438; border-radius: 4px; padding: 9px 16px; cursor: pointer;
+  opacity: 0; transition: opacity 1.2s;
+}
+#again.show { opacity: 1; }
+#again:focus-visible { outline: 2px solid #ff4d6d; outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) { #hint { animation: none; } }
+</style>
+</head>
+<body>
+<canvas id="c" tabindex="0" aria-label="An envelope drawn in symbols, with a heart seal. Tap it to open."></canvas>
+<div class="title">Letter For You</div>
+<div class="bottom">
+  <p id="hint"></p>
+  <button type="button" id="again" hidden></button>
+</div>
+
+<script>
+// =====================================================================
+//  EDIT THE WORDS HERE
+// =====================================================================
+const HINT  = "შეეხე";
+const AGAIN = "თავიდან";
+// =====================================================================
+
+const $ = id => document.getElementById(id);
+$('hint').textContent = HINT;
+$('again').textContent = AGAIN;
+const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const cv = $('c'), ctx = cv.getContext('2d');
+let W, H, cw, ch, cols, rows, S, fs;
+
+// ---------- helpers ----------
+const clamp = (v, a = 0, b = 1) => v < a ? a : v > b ? b : v;
+const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a)); return t * t * (3 - 2 * t); };
+const mix = (a, b, t) => a + (b - a) * t;
+function hash(x, y) { const h = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return h - Math.floor(h); }
+function noise(x, y) {
+  const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
+  const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+  const a = hash(xi, yi), b = hash(xi + 1, yi), c = hash(xi, yi + 1), d = hash(xi + 1, yi + 1);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
+// one result slot: brightness, colour, glyph
+const O = { b: 0, r: 0, g: 0, bl: 0, c: '' };
+const set = (b, r, g, bl, c) => { O.b = b; O.r = r; O.g = g; O.bl = bl; O.c = c; return true; };
+const heavy = n => n > .72 ? '8' : n > .5 ? '%' : n > .3 ? '&' : '#';
+
+// ---------- the envelope: a wide slanted block of dense rows ----------
+const EX = 0.74, ETOP = 0.2, EBOT = -0.52, SKEW = 0.16, TIP = 0.44;
+const SEAL = { x: 0, y: -0.14 };
+function heartF(u, v) { const w = 1.2 * v - Math.sqrt(Math.abs(u)); return u * u + w * w - 1; }
+const DENSE = '8&%$#@';
+function envelope(x, y, st) {
+  x = x - st.shake - SKEW * (y - ETOP);                  // lean like the video
+  const ax = Math.abs(x);
+  if (ax > EX || y < EBOT || y > ETOP) return false;
+  const n = noise(x * 14, y * 9), warm = 0.75 + 0.25 * (1 - (ETOP - y) / (ETOP - EBOT));
+  if (y > ETOP - 0.03) {                                 // top edge with coloured glints
+    const gl = hash(Math.floor(x * 60), 3);
+    return gl > .9 ? set(1, 150, 170, 255, '/') : gl > .82 ? set(1, 255, 140, 200, '/') : set(.95, 255, 220, 185, '/');
+  }
+  if (ax > EX - 0.022) return set(.85, 250, 195, 150, '/');
+  // wax seal: pink heart with a blue shine
+  const hr = 0.1 * (1 + 0.06 * st.pulse + 0.25 * st.glow);
+  const f = heartF((x - SEAL.x) / hr, (y - SEAL.y) / hr + 0.15);
+  if (f < 0) {
+    const blue = (y - SEAL.y) < -0.035 && hash(Math.floor(x * 50), Math.floor(y * 40)) > .45;
+    return blue ? set(1, 120, 120, 255, '@') : set(1, 255, 90 + 120 * st.glow, 210 - 60 * st.glow, f < -.5 ? '@' : '%');
+  }
+  // the V flap and the bottom folds show as gaps of lighter strokes
+  const yl = ETOP - TIP * (1 - ax / EX);
+  if (Math.abs(y - yl) < 0.03) return set(.5, 235, 175, 130, x < 0 ? '\\' : '/');
+  const yb = EBOT + (TIP + 0.06) * (1 - ax / EX);
+  if (Math.abs(y - yb) < 0.026) return set(.45, 230, 165, 120, x < 0 ? '/' : '\\');
+  const inFlap = y > yl, inBottom = y < yb;
+  const g = DENSE[Math.floor(hash(Math.floor(x * 70), Math.floor(y * 40)) * DENSE.length)];
+  const b = (inFlap ? .92 : inBottom ? .7 : .8) * warm + .1 * n;
+  return set(b, 255, mix(150, 200, b), mix(95, 140, b), g);
+}
+
+// ---------- the fire: every bit of paper scorches, flames, glows as an ember, turns to ash ----------
+const SPEED = 0.52;
+const fbm = (x, y) => 0.6 * noise(x, y) + 0.3 * noise(x * 2.1, y * 2.1) + 0.1 * noise(x * 4.3, y * 4.3);
+function inPaper(x, y) { const xx = x - SKEW * (y - ETOP); return Math.abs(xx) < EX && y > EBOT && y < ETOP; }
+function burnAge(x, y, o, t) {
+  const dx = x - SEAL.x, dy = y - SEAL.y;
+  const d = Math.hypot(dx, dy * (dy > 0 ? 0.85 : 1.1)) + 0.22 * (fbm(x * 3.5, y * 3.5) - .5);
+  return o - T_IGNITE - d / SPEED;
+}
+// flames: hot paper below a cell feeds tongues that lick upward
+function flame(x, y, o, t) {
+  let F = 0;
+  for (const h of [0, 0.04, 0.09, 0.15, 0.22, 0.3]) {
+    const yy = y - h;
+    if (!inPaper(x, yy)) continue;
+    const a = burnAge(x, yy, o, t);
+    if (a > 0 && a < 1.1) F = Math.max(F, (1 - a / 1.1) * Math.exp(-h * 6));
+  }
+  if (F <= 0) return 0;
+  const turb = fbm(x * 7 + 3, y * 5.5 - t * 3.2);
+  return F * smooth(0.3, 0.75, turb + 0.25 * F);
+}
+function fire(x, y, o, t) {
+  const F = flame(x, y, o, t);
+  if (F > 0.16) {
+    const g = F > .62 ? '#' : F > .45 ? '*' : F > .3 ? '+' : '.';
+    return set(.5 + .5 * F, 255, 110 + 140 * F, 30 + 150 * F * F, g);
+  }
+  if (!inPaper(x, y)) return false;
+  const age = burnAge(x, y, o, t);
+  if (age < 0) return false;                            // still paper
+  const fl = noise(x * 40, y * 30 + t * 5);
+  if (age < 0.14) return set(1, 255, 240, 190, fl > .5 ? '@' : '#');
+  if (age < 1.7) {                                      // embers
+    const heat = Math.exp(-(age - 0.14) * 1.5);
+    if (hash(Math.floor(x * 80), Math.floor(y * 40)) > 0.45 + 0.5 * heat) return false;
+    const g = '•+•()+•*'[Math.floor(hash(Math.floor(x * 80) + 7, Math.floor(y * 40)) * 8)];
+    return set((.3 + .7 * heat) * (.65 + .35 * fl), 255, 60 + 170 * heat, 20 + 110 * heat * heat, g);
+  }
+  if (age < 2.8) {                                      // ash
+    if (hash(Math.floor(x * 80) + 3, Math.floor(y * 40)) > 0.4) return false;
+    return set(.35 * (1 - (age - 1.7) / 1.1), 140, 80, 70, hash(x * 9, y * 9) > .5 ? '.' : ':');
+  }
+  return false;
+}
+
+// ---------- the rose: a cup of 8s split by petal gaps and \ folds, two big leaves under it ----------
+const HEAD_Y = 0.38, HEAD_R = 0.4, BASE_Y = -1.0, TILT = 0.05;
+function leaf(x, y, cx, cy, ang, len, w, bend) {
+  const dx = x - cx, dy = y - cy, c = Math.cos(ang), s = Math.sin(ang);
+  const u = dx * c + dy * s; let v = -dx * s + dy * c;
+  if (u < 0 || u > len) return -1;
+  v -= bend * (u / len) ** 2;
+  const half = w * Math.sin(Math.PI * Math.min(1, u / len * 1.05)) * (1 - 0.35 * u / len);
+  return Math.abs(v) > half ? -1 : Math.abs(v) / half;
+}
+// the head: a tall shield of 8s, narrow flat top, widest a third down, tapering to a point
+function head(x, y) {
+  const c = Math.cos(TILT), s = Math.sin(TILT), dx = x, dy = y - HEAD_Y;
+  const u = (dx * c + dy * s) / HEAD_R, v = (-dx * s + dy * c) / HEAD_R;
+  const top = 0.7 + 0.04 * Math.sin(u * 9);
+  if (v > top || v < -1) return false;
+  // rounded bulb: narrow flat top that widens fast, wide straight-ish sides, round bottom
+  const hw = v > 0.3 ? 0.5 + 0.38 * Math.sqrt(clamp((top - v) / (top - 0.3)))
+           : v > -0.4 ? 0.88 - 0.1 * ((0.3 - v) / 0.7)
+           : 0.78 * Math.sqrt(clamp(1 - ((-0.4 - v) / 0.6) ** 2));
+  if (Math.abs(u) > hw) return false;
+  const cx = Math.floor(u * 55), cy = Math.floor(v * 26);
+  const h = hash(cx, cy), n = noise(u * 5 + 2, v * 5);
+  const edge = hw - Math.abs(u);
+  if (edge < 0.07) return h > .7 ? set(.75, 230, 70, 80, '+') : set(.8, 220, 45, 55, '8');
+  if (top - v < 0.06) return set(.95, 255, 120, 110, h > .6 ? '8' : '&');
+  // small gaps between petals
+  if (h < 0.1 + 0.12 * smooth(.45, .75, n)) return set(0, 0, 0, 0, ' ');
+  const lower = v < -0.5;
+  if (lower) {
+    const g = h > .7 ? '#' : h > .45 ? '=' : h > .3 ? '-' : '8';
+    return set(.45 + .2 * n, 175, 25, 40, g);
+  }
+  // diagonal folds running down and to the right
+  const fold = ((u - 0.75 * v) * 3.2 + 0.5 * n) % 1;
+  if ((fold + 1) % 1 < 0.13 && Math.abs(u) < hw * 0.8 && v < 0.5) return set(.6, 200, 40, 55, '\\');
+  const hi = smooth(.35, .8, noise(u * 7 + 9, v * 6));
+  const g = h > .94 ? '%' : h > .88 ? '&' : h > .84 ? '$' : '8';
+  return set(.55 + .45 * hi, mix(195, 255, hi), mix(25, 75, hi), mix(35, 75, hi), g);
+}
+function rose(x, y, t, sway) {
+  x -= sway * (y - BASE_Y);
+  if (head(x, y)) return O.c !== ' ';
+  const hb = HEAD_Y - HEAD_R * 0.92;
+  const sx = 0.015 * Math.sin((y - BASE_Y) * 4);
+  // two big leaves spreading like wings under the head, two smaller ones on the stem
+  let v = leaf(x, y, sx - 0.03, hb, Math.PI + 0.88, 0.7, 0.15, -0.12);
+  if (v < 0) v = leaf(x, y, sx + 0.03, hb, -0.88, 0.7, 0.15, 0.12);
+  if (v < 0) v = leaf(x, y, sx, -0.6, Math.PI + 0.5, 0.32, 0.08, -0.04);
+  if (v < 0) v = leaf(x, y, sx, -0.38, -0.4, 0.3, 0.075, 0.04);
+  if (v >= 0) {
+    const h = hash(Math.floor(x * 80), Math.floor(y * 40));
+    if (v > 0.68) return set(.7, 140, 190, 165, '%&#$'[Math.floor(h * 4)]);
+    if (h < .2) return set(.5, 120, 160, 150, '\\');
+    return set(.38, 115, 140, 135, h > .6 ? ':' : '.');
+  }
+  // double stem with thorns
+  const ds = x - sx;
+  if (y > BASE_Y && y < hb && Math.abs(ds) < 0.026) return set(.65, 170, 200, 180, '|');
+  if (Math.abs(y + 0.22) < 0.016 && ds > 0.02 && ds < 0.075) return set(.6, 200, 210, 200, '>');
+  if (Math.abs(y + 0.5) < 0.016 && ds < -0.02 && ds > -0.075) return set(.6, 200, 210, 200, '<');
+  if (Math.abs(y + 0.8) < 0.016 && ds > 0.02 && ds < 0.075) return set(.6, 200, 210, 200, '>');
+  return false;
+}
+
+function roseAlpha(x, y, p) {                            // the head warms up from its centre, then stem and leaves grow down
+  const n = noise(x * 8 + 3, y * 8) * 0.45;
+  const r = Math.hypot(x, y - HEAD_Y) / HEAD_R;
+  const k = r < 1.1 ? p * 1.3 - (n + r * 0.55) : (p - 0.3) * 1.9 - ((HEAD_Y - y) / (HEAD_Y - BASE_Y) + n * 0.4);
+  return smooth(0, 0.3, k);
+}
+
+// ---------- sky ----------
+const STARS = Array.from({ length: 150 }, () => ({ x: Math.random(), y: Math.random(), ph: Math.random() * 7, sp: .6 + Math.random() * 1.6 }));
+let streaks = [];
+function makeStreaks() {
+  streaks = Array.from({ length: Math.round(rows * 1.8) }, () => newStreak());
+}
+function newStreak() {
+  // rows near the rose get more and longer streaks, both ways out from the middle
+  const yW = HEAD_Y + (Math.random() - 0.5) * 2.6 * Math.sqrt(Math.random());
+  return { y: yW, dir: Math.random() < .5 ? -1 : 1, off: Math.random() * 2, len: 0.15 + Math.random() * 0.55, v: 0.25 + Math.random() * 0.5, ph: Math.random() * 7 };
+}
+
+// ---------- layout ----------
+const wx = px => (px - W / 2) / S;
+const wy = py => (H * 0.5 - py) / S;
+const toCol = x => Math.floor((x * S + W / 2) / cw);
+const toRow = y => Math.floor((H * 0.5 - y * S) / ch);
+function resize() {
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  W = innerWidth; H = innerHeight;
+  cv.width = W * dpr; cv.height = H * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  fs = Math.max(7, Math.min(13, W / 66));
+  ctx.font = `${fs}px ${getComputedStyle(document.documentElement).getPropertyValue('--mono')}`;
+  ctx.textBaseline = 'top';
+  cw = ctx.measureText('8').width; ch = fs * 1.08;
+  cols = Math.ceil(W / cw); rows = Math.ceil(H / ch);
+  S = Math.min(W / 1.95, (H * 0.5 - 70) / 1.02, H * 0.5 / 1.0);
+  makeStreaks();
+}
+
+// ---------- timeline ----------
+const T_IGNITE = 0.6, T_ROSE = 2.2, T_LAND = 5.6;
+let opened = -1, start = performance.now(), parts = [], endShown = false, lastNow = 0;
+
+function ember(o, t) {                                  // sparks lifting off burning paper
+  const x = (Math.random() * 2 - 1) * (EX + 0.1), y = EBOT + Math.random() * (ETOP - EBOT);
+  if (!inPaper(x, y)) return;
+  const a = burnAge(x, y, o, t);
+  if (a < 0 || a > 0.9) return;
+  parts.push({ x, y, vx: (Math.random() - .5) * 0.12, vy: 0.3 + Math.random() * 0.5, life: 0, max: 0.7 + Math.random() * 1.3,
+    c: '.*+•'[Math.random() * 4 | 0], r: 255, g: 150 + Math.random() * 100, bl: 60 });
+}
+
+function frame(now) {
+  const dt = Math.min(0.05, (now - (lastNow || now)) / 1000); lastNow = now;
+  const t = (now - start) / 1000;
+  const o = opened < 0 ? -1 : t - opened;
+  const fadeIn = smooth(0, 1.2, t);
+
+  const st = { shake: 0, glow: 0, pulse: .5 + .5 * Math.sin(t * 3.4) };
+  if (opened >= 0) {
+    st.glow = smooth(0, 0.5, o);
+    if (!REDUCED && o < T_IGNITE) st.shake = 0.012 * Math.sin(o * 60) * (o / T_IGNITE);
+  }
+  const burning = opened >= 0 && o >= T_IGNITE;
+  const roseP = opened < 0 ? 0 : clamp((o - T_ROSE) / (T_LAND - T_ROSE));
+  const sky = opened < 0 ? 0 : smooth(T_LAND - .4, T_LAND + 1.4, o);
+  const sway = opened < 0 ? 0 : 0.03 * Math.sin(t * 0.8) * smooth(T_LAND, T_LAND + 2, o);
+  if (burning && o < T_ROSE + 1.5 && !REDUCED) for (let i = 0; i < 40; i++) ember(o, t);
+  if (opened >= 0 && !endShown && o > T_LAND + 1.6) { endShown = true; $('again').hidden = false; requestAnimationFrame(() => $('again').classList.add('show')); }
+
+  ctx.fillStyle = '#030208'; ctx.fillRect(0, 0, W, H);
+
+  // stars
+  for (const s of STARS) {
+    const tw = .5 + .5 * Math.sin(t * s.sp + s.ph);
+    ctx.fillStyle = `rgba(215,205,255,${(.12 + .5 * tw) * fadeIn})`;
+    ctx.fillText(tw > .88 ? '*' : tw > .5 ? '+' : '.', Math.floor(s.x * cols) * cw, Math.floor(s.y * rows) * ch);
+  }
+
+  // blue light: horizontal streaks out of the rose and a beam above it
+  if (sky > 0) {
+    ctx.fillStyle = `rgba(150,150,170,${0.16 * sky})`;
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) if (hash(c, r) < 0.28) ctx.fillText(hash(r, c) > .5 ? ':' : '.', c * cw, r * ch);
+    for (const k of streaks) {
+      k.off += k.v * dt;
+      if (k.off > 2.2) Object.assign(k, newStreak(), { off: 0 });
+      const row = toRow(k.y); if (row < 0 || row >= rows) continue;
+      const near = Math.exp(-(((k.y - HEAD_Y) / 0.45) ** 2));
+      const head = 0.22 + k.off, n = Math.max(3, Math.round(k.len * S / cw));
+      for (let i = 0; i < n; i++) {
+        const xw = k.dir * (head - i * cw / S); if (k.dir * xw < 0.18) break;
+        const col = toCol(xw); if (col < 0 || col >= cols) continue;
+        const a = (1 - i / n) * sky * (0.5 + 0.5 * near) * (0.75 + 0.25 * Math.sin(t * 6 + k.ph + i));
+        ctx.fillStyle = i === 0 ? `rgba(180,205,255,${a})` : `rgba(70,105,235,${a})`;
+        ctx.fillText(i === 0 ? '+' : i % 4 === 0 ? '=' : '-', col * cw, row * ch);
+      }
+    }
+    const topRow = toRow(HEAD_Y + HEAD_R * 0.9), cc = toCol(0);
+    for (let r = topRow; r >= 0; r--) {
+      const d = topRow - r, w = Math.round(1 + 3 * hash(r, Math.floor(t * 5)) * Math.exp(-d / 18));
+      const a = sky * 0.55 * Math.exp(-d / 26);
+      for (let i = -w; i <= w; i++) {
+        ctx.fillStyle = i === 0 ? `rgba(190,210,255,${a})` : `rgba(80,115,240,${a * .8})`;
+        ctx.fillText(i === 0 ? '+' : Math.abs(i) === w ? '-' : '=', (cc + i) * cw, r * ch);
+      }
+    }
+  }
+
+  // scene, cell by cell: rose over fire over paper
+  for (let r = 0; r < rows; r++) {
+    const y = wy((r + .5) * ch);
+    if (y > 1.3 || y < -1.1) continue;
+    for (let c = 0; c < cols; c++) {
+      const x = wx((c + .5) * cw);
+      if (x < -1 || x > 1) continue;
+      let alpha = 1;
+      const ra = roseP > 0 ? roseAlpha(x, y, roseP) : 0;
+      if (ra > 0 && rose(x, y, t, sway)) {
+        // fresh rose cells glow ember-orange, then cool to their own colour
+        const warm = 1 - smooth(0.25, 1, ra);
+        O.r = mix(O.r, 255, warm); O.g = mix(O.g, 150, warm); O.bl = mix(O.bl, 60, warm);
+        alpha = ra;
+      }
+      else if (burning && fire(x, y, o, t)) { /* fire */ }
+      else if (envelope(x, y, st)) {
+        if (burning) {                                   // paper ahead of the fire browns and darkens
+          const age = burnAge(x, y, o, t);
+          if (age >= 0) continue;
+          const sc = smooth(-0.4, 0, age);
+          O.r = mix(O.r, 150, sc); O.g = mix(O.g, 60, sc); O.bl = mix(O.bl, 25, sc);
+          if (age > -0.06) { O.r = 255; O.g = 170; O.bl = 60; O.b = 1; }    // glowing rim
+        }
+        O.b *= fadeIn;
+      } else continue;
+      ctx.fillStyle = `rgba(${O.r | 0},${O.g | 0},${O.bl | 0},${(.3 + .7 * clamp(O.b)) * alpha})`;
+      ctx.fillText(O.c, c * cw, r * ch);
+    }
+  }
+
+  // sparks
+  parts = parts.filter(p => {
+    p.life += dt; p.x += (p.vx + 0.05 * Math.sin(p.life * 5 + p.y * 9)) * dt; p.y += p.vy * dt;
+    const a = 1 - p.life / p.max; if (a <= 0) return false;
+    ctx.fillStyle = `rgba(${p.r | 0},${p.g | 0},${p.bl | 0},${a})`;
+    ctx.fillText(p.c, toCol(p.x) * cw, toRow(p.y) * ch);
+    return true;
+  });
+
+  requestAnimationFrame(frame);
+}
+
+function open() {
+  if (opened >= 0) return;
+  opened = (performance.now() - start) / 1000;
+  $('hint').hidden = true;
+  cv.setAttribute('aria-label', 'The seal catches fire, the envelope burns away and a red rose grows from the ashes.');
+}
+function replay() {
+  opened = -1; endShown = false; parts = [];
+  $('again').classList.remove('show'); $('again').hidden = true; $('hint').hidden = false;
+  cv.setAttribute('aria-label', 'An envelope drawn in symbols, with a heart seal. Tap it to open.');
+}
+cv.addEventListener('click', open);
+cv.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+$('again').addEventListener('click', replay);
+addEventListener('resize', resize);
+(document.fonts ? document.fonts.ready : Promise.resolve()).then(() => { resize(); requestAnimationFrame(frame); });
+</script>
+</body>
+</html>
